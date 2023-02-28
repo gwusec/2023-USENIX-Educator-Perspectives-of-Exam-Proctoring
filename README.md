@@ -39,3 +39,5 @@ David G. Balash, Rahel A. Fainchtein, Elena Korkes, Miles Grant, Micah Sherr, an
 “Educators’ Perspectives of Using (or Not Using) Online Exam Proctoring”.
 _Proceedings of the 32nd USENIX Security Symposium (USENIX 2023)._ 
 
+(Extended version avaialble on [arXiv](https://arxiv.org/abs/2302.12936)
+
