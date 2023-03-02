@@ -4,7 +4,7 @@ These include:
 
 * The complete survey presented to participants as both QSF and .txt files
 * Codebooks used for qualitative analysis of free-text responses
-* Qualitative coding worksheets with a breakdown of IRR values froomo each round of coding, and Scripts for computing IRR
+* Qualitative coding worksheets with a breakdown of IRR values from each round of coding, and Scripts for computing IRR
 * Analysis scripts used to process data including:
   * R scripts for data processing
   * input data files in csv format
@@ -12,24 +12,24 @@ These include:
 * A PDF of the paper itself
 
 ## Repository Structure:
-(Suggested folder and file structure for the repo.)
-* __Survey-Instruments__
+
+* __Survey-Instruments__: The survey as presented to participants as Qualtrics export (QSF) and as a .txt document.
   * QSF-survey-file(s)
   * TXT-survey-file(s)
 * __Scripts__ 
-  * Quantitative_analysis
-    * R_script_files
-  * Qualitative_analysis
-    * irr.py
+  - Quantitative_analysis: *Scripts used for both initial processing of quantitative data, and for exploratory analysis*
+    - R_script_files
+  - Qualitative_analysis: *Scriptss for assessing qualitative analysis*
+    - irr.py
 * __Data__
-  * Quantitative_data
-    * Likert_response_data_files
-  * Qualitative_data
-    * Free_text_response_files
-    * Qualitative_codebok_files
+  - Quantitative_data
+    - Likert_response_data_files
+  - *Qualitative_data
+    - Free_text_response_files
+    - Qualitative_codebok_files
 * __Figures__
   * Rendered_figure_files
-  * Table_filies (PDFs)
+  * Table_filies (R script outputs and .tex files)
 * __PDFs__
   * USENIX-paper-pdf
   * Arxiv-paper-pdf
