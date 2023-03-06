@@ -1,4 +1,4 @@
-# quantative-analysis
+# quantitative-analysis
 This folder contains the quantitative analysis scripts, data, and output.
 
 
