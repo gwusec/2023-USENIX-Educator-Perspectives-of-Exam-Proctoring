@@ -1,0 +1,2926 @@
+---
+title: "Exam Privacy Eductor Survey"
+author: "David Balash"
+date: "01/12/2022"
+output: html_document
+knit: (function(input_file, encoding) {
+  out_dir <- './docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+---
+
+```{r setup, include=FALSE}
+library(ordinal)
+library(MASS)
+library(tidyverse)
+library(ggalluvial)
+library(ggrepel)
+library(ggfittext)
+library(cowplot)
+library(scales)
+library(lubridate)
+library(broom)
+library(xtable)
+library(rstatix)
+library(Hmisc)
+
+
+# Create output directories if not existing
+dir.create(file.path("./tables/"), showWarnings = FALSE)
+dir.create(file.path("./figures/"), showWarnings = FALSE)
+
+# Define factor levels of categorical data
+factorLevels <- list(
+  #############################################################################
+  age = c("18 - 24", "25 - 34", "35 - 44", "45 - 54", "55 - 64", "65 or older", "Prefer not to disclose"),
+  agreement = c("Strongly disagree", "Disagree", "Neither agree nor disagree", "Agree", "Strongly agree"),
+  agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+  agreementIUIPC = c("Strongly disagree", "Somewhat disagree", "Disagree", "Neither agree nor disagree", "Somewhat agree", "Agree", "Strongly agree"),
+  appropriateness = c("Absolutely inappropriate", "Inappropriate", "Slightly inappropriate", "Neutral", "Slightly appropriate", "Appropriate", "Absolutely appropriate"),
+  # Not at all aware	Slightly aware	Somewhat aware	Moderately aware	Extremely aware
+  awareness = c("Not at all aware", "Slightly aware ", "Somewhat aware ", "Moderately aware ", "Extremely aware"),
+  awareUnsure = c("Aware", "Unaware", "I'm Unsure"),
+  background = c("I have an education in, or work in, the field of computer science, computer engineering or IT.", "I do not have an education in, nor do I work in, the field of computer science, computer engineering or IT.", "Prefer not to disclose"),
+  # Very uncomfortable	Uncomfortable	Neither comfortable nor uncomfortable	Comfortable	Very comfortable
+  # Very comfortable	Comfortable	Neither comfortable nor uncomfortable	Uncomfortable	Very uncomfortable
+  comfort = c("Very uncomfortable", "Uncomfortable", "Neither comfortable nor uncomfortable", "Comfortable", "Very comfortable"),
+  comfort2 = c("Very Uncomfortable", "Uncomfortable", "Neither  comfortable nor uncomfortable", "Comfortable", "Very comfortable"),
+  comfort3 = c("Extremely uncomfortable", "Somewhat uncomfortable", "Neither comfortable nor uncomfortable", "Somewhat comfortable", "Extremely comfortable"),
+  concern = c("Not at all concerned", "Slightly concerned", "Somewhat concerned", "Moderately concerned", "Extremely concerned"),
+  concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+  education = c("No schooling completed", "Some high school, no diploma", "High school graduate, diploma, or equivalent (e.g., GED, Abitur, baccalaureat)", "Some college credit, no degree", "Trade / technical / vocational training", "Associate degree", "Bachelor's degree", "Master's degree", "Professional degree (e.g., J.D., M.D.)", "Doctorate degree", "Prefer not to disclose"),
+  enabled = c("Enabled"),
+  familiar = c("Not at all familiar ", "Slightly familiar ", "Somewhat familiar ", "Moderately familiar ", "Extremely familiar"),
+  frequency = c("Never", "Rarely", "Sometimes", "Often", "Always"),
+  gender = c("Woman", "Man", "Non-binary", "Prefer not to disclose"),
+  howLikely = c("Extremely unlikely", "Somewhat unlikely", "Neither likely nor unlikely", "Somewhat likely", "Extremely likely"),
+  # Almost Always	Often	Sometimes	Seldom	Never
+  necessary = c("Never", "Seldom", "Sometimes", "Often", "Almost Always"),
+  percent = c("0-25%", "26-50%", "51-75%", "76-100%", "Prefer not to answer"),
+  yesNo = c("Yes", "No"),
+  yesNoUnsure = c("Yes", "No", "Unsure"),
+  yesNoImUnsure = c("No", "I'm Unsure","Yes"),
+  numberOfExams = c("0", "1", "2", "3", "4", "5+"),
+  organization = c(
+    "College of Professional Studies",
+    "Columbian College of Arts & Sciences",
+    "Corcoran School of the Arts & Design",
+    "Elliott School of International Affairs",
+    "Graduate School of Education & Human Development",
+    "Graduate School of Political Management",
+    "Milken Institute School of Public Health",
+    "Other (Please Specify)",
+    "School of Business",
+    "School of Engineering & Applied Science",
+    "School of Media & Public Affairs",
+    "School of Medicine & Health Sciences",
+    "School of Nursing"
+    )
+  
+  #############################################################################
+)
+
+###############################################################################
+# Function to Calculate pseudo R-squared
+###############################################################################
+aldrich_nelson_pR2 <- function( model, null_model = NULL ){
+  # implemented from " Goodness-of-Fit Measures for Probit and Logit*" by Hagle and Mitchell https://www.jstor.org/stable/pdf/2111590.pdf
+
+  lnL_1 <- logLik(model)
+  
+  if(is.null(null_model)){
+    lnL_0 <- logLik(update(model, ~1, trace = FALSE))
+  } else{
+    
+    lnL_0 <- logLik(null_model)
+  }
+  
+  LLR <- (lnL_0[1]-lnL_1[1])
+  
+  N <- nobs(model)
+  
+  R2 <-  -2 * LLR / (N - 2 * LLR)
+  return(R2 * 1.72) # do the worst adjustment that's listed in the paper. 
+}
+
+# Read main survey results from csv to a data frame and set it up
+yesNoEducatorData <- read.csv("./data/yes_no_educator.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q4_1: 
+    examityAware = ordered(Q4_1, levels = factorLevels$awareUnsure),
+    # Q4_2: 
+    examsoftAware = ordered(Q4_2, levels = factorLevels$awareUnsure),
+    # Q4_3: 
+    honorlockAware = ordered(Q4_3, levels = factorLevels$awareUnsure),
+    # Q4_4: 
+    proctorTrackAware = ordered(Q4_4, levels = factorLevels$awareUnsure),
+    # Q4_5: 
+    proctorUAware = ordered(Q4_5, levels = factorLevels$awareUnsure),
+    # Q4_6: 
+    questionmarkAware = ordered(Q4_6, levels = factorLevels$awareUnsure),
+    # Q4_7: 
+    respondusAware = ordered(Q4_7, levels = factorLevels$awareUnsure),
+    # Q4_8: 
+    softwareSecurePSIAware = ordered(Q4_8, levels = factorLevels$awareUnsure),
+    
+    # Q6: Did you use any online exam proctoring tools to assist in administering any exams or assignments during the Fall 2020/Spring 2021 academic year?
+    didYouUseOnlineProctoring = ordered(Q6, levels = factorLevels$yesNoImUnsure)
+  ) %>%
+  ungroup()
+  
+describe(yesNoEducatorData$examityAware, "Q4_1: Examity aware.")
+describe(yesNoEducatorData$examsoftAware, "Q4_2: Examsoft aware.")
+describe(yesNoEducatorData$honorlockAware, "Q4_3: Honorlock aware.")
+describe(yesNoEducatorData$proctorTrackAware, "Q4_4: Proctor Track (Verificient) aware.")
+describe(yesNoEducatorData$proctorUAware, "Q4_5: ProctorU aware.")
+describe(yesNoEducatorData$questionmarkAware, "Q4_6: Question mark aware.")
+describe(yesNoEducatorData$respondusAware, "Q4_7: Respondus aware.")
+describe(yesNoEducatorData$softwareSecurePSIAware, "Q4_8: Software Secure PSI (Remote Proctor Now) aware.")
+describe(yesNoEducatorData$didYouUseOnlineProctoring, "Q6: Did you use any online exam proctoring tools to assist in administering any exams or assignments during the Fall 2020/Spring 2021 academic year?")
+
+# Read main survey results from csv to a data frame and set it up
+noEducatorData <- read.csv("./data/no_educator.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q2
+    organization = ordered(Q2, levels = factorLevels$organization),
+    
+    # N1: Did you consider using any online exam proctoring tools?
+    noBranchConsiderAnyOnline = ordered(N1, levels = factorLevels$yesNoImUnsure),
+ 
+    # Bin using online exam proctoring
+    noBranchConsiderAnyOnlineForBinning = noBranchConsiderAnyOnline,
+    noBranchConsiderAnyOnlineForBinning.is_consider = noBranchConsiderAnyOnlineForBinning %in% c("Yes"),
+    noBranchConsiderAnyOnlineForBinning.not_consider = noBranchConsiderAnyOnlineForBinning %in% c("No", "I'm Unsure"),   
+    
+    
+    # N5: If you were teaching remotely under the similar circumstances to those of the 2020/2021 academic year, and you decided to administer an exam online, how likely are you to use online exam proctoring tools?
+    noBranchHowLikelyOnlineExam = ordered(N5, levels = factorLevels$howLikely)
+  ) %>%
+  ungroup()
+  
+describe(noEducatorData$organization, "Q2")
+summary(noEducatorData$organization)
+
+describe(noEducatorData$noBranchConsiderAnyOnlineForBinning)
+summary(noEducatorData$noBranchConsiderAnyOnlineForBinning)
+describe(noEducatorData$noBranchConsiderAnyOnlineForBinning.is_consider)
+describe(noEducatorData$noBranchConsiderAnyOnlineForBinning.not_consider)
+
+describe(noEducatorData$noBranchConsiderAnyOnline, "N1: Did you consider using any online exam proctoring tools?")
+describe(noEducatorData$noBranchHowLikelyOnlineExam, "N5: If you were teaching remotely under the similar circumstances to those of the 2020/2021 academic year, and you decided to administer an exam online, how likely are you to use online exam proctoring tools?")
+
+
+# Read main survey results from csv to a data frame and set it up
+yesEducatorData <- read.csv("./data/yes_educator.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q10: How many online proctored assessments have you administered?
+    numberOfExams = ordered(Q10, levels = factorLevels$numberOfExams),
+    
+    # Q13: If you were teaching remotely under the similar circumstances to those of the 2020/2021 academic year, and you decided to administer an exam online, how likely are you to use online exam proctoring tools?
+    likelySimilarToFall2020Spring2021 = ordered(Q13, levels = factorLevels$howLikely),
+    
+    # Bin likely similar to fall 2020 spring 2021
+    #   howLikely = c("Extremely unlikely", "Somewhat unlikely", "Neither likely nor unlikely", "Somewhat likely", "Extremely likely"),
+    likelySimilarToFall2020Spring2021 = likelySimilarToFall2020Spring2021,
+    likelySimilarToFall2020Spring2021.is_likely = likelySimilarToFall2020Spring2021 %in% c("Extremely likely", "Somewhat likely"),
+    likelySimilarToFall2020Spring2021.is_unlikely = likelySimilarToFall2020Spring2021 %in% c("Extremely unlikely", "Somewhat unlikely"),
+    
+    # Q15: Based on your prior experience with online exam proctoring, in the current teaching environment at GW during Fall 2021, how likely are you to use online exam proctoring tools for these assessments?
+    likelyCurrentCircumstancesFall2021 = ordered(Q15, levels = factorLevels$howLikely),
+    
+    # Bin likely similar to fall 2021
+    #   howLikely = c("Extremely unlikely", "Somewhat unlikely", "Neither likely nor unlikely", "Somewhat likely", "Extremely likely"),
+    likelyCurrentCircumstancesFall2021 = likelyCurrentCircumstancesFall2021,
+    likelyCurrentCircumstancesFall2021.is_likely = likelyCurrentCircumstancesFall2021 %in% c("Extremely likely", "Somewhat likely"),
+    likelyCurrentCircumstancesFall2021.is_unlikely = likelyCurrentCircumstancesFall2021 %in% c("Extremely unlikely", "Somewhat unlikely"),
+    
+    # Q17	RQ1	Descriptive	5pt Likely	Bar Chart		Based on your prior experience with online exam proctoring, assuming the end of the pandemic and a full return to in person learning, how likely are you to use online exam proctoring tools for these assessments?
+    likelyFullReturnToInPerson = ordered(Q17, levels = factorLevels$howLikely),
+    
+    # Bin likely full return
+    #   howLikely = c("Extremely unlikely", "Somewhat unlikely", "Neither likely nor unlikely", "Somewhat likely", "Extremely likely"),
+    likelyFullReturnToInPerson = likelyFullReturnToInPerson,
+    likelyFullReturnToInPerson.is_likely = likelyFullReturnToInPerson %in% c("Extremely likely", "Somewhat likely"),
+    likelyFullReturnToInPerson.is_unlikely = likelyFullReturnToInPerson %in% c("Extremely unlikely", "Somewhat unlikely"),
+    
+    
+    # Q19	RQ1	Descriptive	5pt Agreement			The use of online exam proctoring tools makes it less likely that my students will cheat on an exam.
+    thinkOneLessCheating = ordered(Q19, levels = factorLevels$agreement2), 
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    thinkOneLessCheating = thinkOneLessCheating,
+    thinkOneLessCheating.agree = thinkOneLessCheating  %in% c("Strongly agree", "Somewhat agree"),
+    thinkOneLessCheating.disagree = thinkOneLessCheating  %in% c("Strongly disagree", "Somewhat disagree"),
+    
+    
+    # Q20	RQ1	Descriptive	0-100%			I believe that online proctoring will catch cheating this percent of the time when students are actually cheating:
+    cheatingPercentage = ordered(Q20, levels = factorLevels$percent),
+    # percent = c("0-25%", "26-50%", "51-75%", "76-100%", "Prefer not to answer"),
+    cheatingPercentage = cheatingPercentage,
+    cheatingPercentage.more_than_half = cheatingPercentage %in% c("51-75%", "76-100%"),
+    cheatingPercentage.less_than_half = cheatingPercentage %in% c("0-25%", "26-50%"),
+    
+    # Q21	RQ1	Descriptive	Yes/No/Unsure			Did [online exam proctoring service name] report any potential cheating during an exam?
+    potentialCheating = ordered(Q21, levels = factorLevels$yesNoImUnsure), 
+    # yesNoImUnsure = c("Yes", "No", "I'm Unsure"),
+    potentialCheating = potentialCheating,
+    potentialCheating.yes = potentialCheating %in% c("Yes"),
+    potentialCheating.no = potentialCheating %in% c("No"),
+    
+# Q22	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+  thinkTwoPrivacyInvasive= ordered(Q22, levels = factorLevels$agreement2), 
+
+# Q23	RQ2	Descriptive	5pt Agreement			I think [online exam proctoring service name] offers a reasonable tradeoff between student privacy and the integrity of the exam
+  thinkOneReasonableTradeoff= ordered(Q23, levels = factorLevels$agreement2), 
+
+# Q24	RQ2	Descriptive	5pt Agreement			I am concerned about the risks to student privacy by using [online exam proctoring service name].
+  thinkTwoRiskToPrivacy= ordered(Q24, levels = factorLevels$agreement2), 
+
+# Q25	RQ2	Descriptive	5pt Agreement			I think [online exam proctoring service name] is a good solution for monitoring remote examinations.    
+  thinkOneGoodSolution= ordered(Q25, levels = factorLevels$agreement2),    
+
+    
+    
+    # Q27 How concerned are you about students installing software created by [online exam proctoring service name] on their personal computers?
+    concernAboutSoftware = ordered(Q27, levels = factorLevels$concern),
+    
+    
+    # Q30 If you were to administer another online proctored exam would you enable the same monitoring options again?
+    wouldYouUseSameOptions = ordered(Q30, levels = factorLevels$yesNoImUnsure),
+    
+    # Q33_1 - Q33_12
+    # For each exam monitoring type please select how comfortable you would feel about using it to monitor students during online proctored exams in your course.
+    q33 = across(all_of(c("Q33_1", "Q33_2", "Q33_3", "Q33_4", "Q33_5", "Q33_6", "Q33_7", "Q33_8", "Q33_9", "Q33_10", "Q33_11", "Q33_12")), ordered, levels = factorLevels$comfort3),
+    
+    monitorLiveProctorVisible = ordered(Q33_1, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorLiveProctorVisible = monitorLiveProctorVisible,
+    monitorLiveProctorVisible.is_comfortable = monitorLiveProctorVisible %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorLiveProctorVisible.not_comfortable = monitorLiveProctorVisible %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorLiveProctorNotVisible = ordered(Q33_2, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorLiveProctorNotVisible = monitorLiveProctorNotVisible,
+    monitorLiveProctorNotVisible.is_comfortable = monitorLiveProctorNotVisible %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorLiveProctorNotVisible.not_comfortable = monitorLiveProctorNotVisible %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorWebBrowserHistory = ordered(Q33_3, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorWebBrowserHistory = monitorWebBrowserHistory,
+    monitorWebBrowserHistory.is_comfortable = monitorWebBrowserHistory %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorWebBrowserHistory.not_comfortable = monitorWebBrowserHistory %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorEyeMovementTracking = ordered(Q33_4, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorEyeMovementTracking = monitorEyeMovementTracking,
+    monitorEyeMovementTracking.is_comfortable = monitorEyeMovementTracking %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorEyeMovementTracking.not_comfortable = monitorEyeMovementTracking %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorFaceDetection = ordered(Q33_5, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorFaceDetection = monitorFaceDetection,
+    monitorFaceDetection.is_comfortable = monitorFaceDetection %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorFaceDetection.not_comfortable = monitorFaceDetection %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorLockdownBrowser = ordered(Q33_6, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorLockdownBrowser = monitorLockdownBrowser,
+    monitorLockdownBrowser.is_comfortable = monitorLockdownBrowser %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorLockdownBrowser.not_comfortable = monitorLockdownBrowser %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorMouseMovementTracking = ordered(Q33_7, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorMouseMovementTracking = monitorMouseMovementTracking,
+    monitorMouseMovementTracking.is_comfortable = monitorMouseMovementTracking %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorMouseMovementTracking.not_comfortable = monitorMouseMovementTracking %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorKeyboardRestrictions = ordered(Q33_8, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorKeyboardRestrictions = monitorKeyboardRestrictions,
+    monitorKeyboardRestrictions.is_comfortable = monitorKeyboardRestrictions %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorKeyboardRestrictions.not_comfortable = monitorKeyboardRestrictions %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorScreenRecording = ordered(Q33_9, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorScreenRecording = monitorScreenRecording,
+    monitorScreenRecording.is_comfortable = monitorScreenRecording %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorScreenRecording.not_comfortable = monitorScreenRecording %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorMicrophoneRecording = ordered(Q33_10, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorMicrophoneRecording = monitorMicrophoneRecording,
+    monitorMicrophoneRecording.is_comfortable = monitorMicrophoneRecording %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorMicrophoneRecording.not_comfortable = monitorMicrophoneRecording %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorInternetActivityMonitoring = ordered(Q33_11, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorInternetActivityMonitoring = monitorInternetActivityMonitoring,
+    monitorInternetActivityMonitoring.is_comfortable = monitorInternetActivityMonitoring %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorInternetActivityMonitoring.not_comfortable = monitorInternetActivityMonitoring %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    monitorWebcamRecording = ordered(Q33_12, levels = factorLevels$comfort3),
+
+    # Bin comfort
+    monitorWebcamRecording = monitorWebcamRecording,
+    monitorWebcamRecording.is_comfortable = monitorWebcamRecording %in% c("Extremely comfortable", "Somewhat comfortable"),
+    monitorWebcamRecording.not_comfortable = monitorWebcamRecording %in% c("Extremely uncomfortable", "Somewhat uncomfortable"),
+
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    q34 = across(all_of(c("Q34_1", "Q34_2", "Q34_3", "Q34_4", "Q34_5", "Q34_6", "Q34_7", "Q34_8", "Q34_9", "Q34_10", "Q34_11")), ordered, levels = factorLevels$concern2),
+#   concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    
+    studentFullName = ordered(Q34_1, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentFullName = studentFullName,
+    studentFullName.is_concerned = studentFullName %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentFullName.not_concerned = studentFullName %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentDateOfBirth = ordered(Q34_2, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentDateOfBirth = studentDateOfBirth,
+    studentDateOfBirth.is_concerned = studentDateOfBirth %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentDateOfBirth.not_concerned = studentDateOfBirth %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentPhotoId = ordered(Q34_3, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentPhotoId = studentPhotoId,
+    studentPhotoId.is_concerned = studentPhotoId %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentPhotoId.not_concerned = studentPhotoId %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentSocialSecurityNumber = ordered(Q34_4, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentSocialSecurityNumber = studentSocialSecurityNumber,
+    studentSocialSecurityNumber.is_concerned = studentSocialSecurityNumber %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentSocialSecurityNumber.not_concerned = studentSocialSecurityNumber %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentStreetAddress = ordered(Q34_5, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentStreetAddress = studentStreetAddress,
+    studentStreetAddress.is_concerned = studentStreetAddress %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentStreetAddress.not_concerned = studentStreetAddress %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentCoordinates = ordered(Q34_6, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentCoordinates = studentCoordinates,
+    studentCoordinates.is_concerned = studentCoordinates %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentCoordinates.not_concerned = studentCoordinates %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentAudioRecording = ordered(Q34_7, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentAudioRecording = studentAudioRecording,
+    studentAudioRecording.is_concerned = studentAudioRecording %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentAudioRecording.not_concerned = studentAudioRecording %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentVideoRecording = ordered(Q34_8, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentVideoRecording = studentVideoRecording,
+    studentVideoRecording.is_concerned = studentVideoRecording %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentVideoRecording.not_concerned = studentVideoRecording %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentScreenView = ordered(Q34_9, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentScreenView = studentScreenView,
+    studentScreenView.is_concerned = studentScreenView %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentScreenView.not_concerned = studentScreenView %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentRoomScan = ordered(Q34_10, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentRoomScan = studentRoomScan,
+    studentRoomScan.is_concerned = studentRoomScan %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentRoomScan.not_concerned = studentRoomScan %in% c("Slightly Concerned", "Not at all Concerned"),
+
+    studentApplicationRecord = ordered(Q34_11, levels = factorLevels$concern2), 
+
+    # Bin concern
+    studentApplicationRecord = studentApplicationRecord,
+    studentApplicationRecord.is_concerned = studentApplicationRecord %in% c("Extremely Concerned", "Moderately Concerned", "Somewhat Concerned"),
+    studentApplicationRecord.not_concerned = studentApplicationRecord %in% c("Slightly Concerned", "Not at all Concerned")
+    
+  ) %>%
+  ungroup()
+  
+summary(yesEducatorData)
+describe(yesEducatorData$numberOfExams, "Q10: How many online proctored assessments have you administered?")
+describe(yesEducatorData$likelySimilarToFall2020Spring2021, "Q13: If you were teaching remotely under the similar circumstances to those of the 2020/2021 academic year, and you decided to administer an exam online, how likely are you to use online exam proctoring tools?")
+describe(yesEducatorData$likelySimilarToFall2020Spring2021.is_likely, "Q13: is likely")
+describe(yesEducatorData$likelySimilarToFall2020Spring2021.is_unlikely, "Q13: is unlikely")
+
+describe(yesEducatorData$likelyCurrentCircumstancesFall2021, "Q15: Based on your prior experience with online exam proctoring, in the current teaching environment at GW during Fall 2021, how likely are you to use online exam proctoring tools for these assessments?")
+describe(yesEducatorData$likelyCurrentCircumstancesFall2021.is_likely, "Q15: is likely")
+describe(yesEducatorData$likelyCurrentCircumstancesFall2021.is_unlikely, "Q15: is unlikely")
+
+describe(yesEducatorData$likelyFullReturnToInPerson, "Q17: Based on your prior experience with online exam proctoring, assuming the end of the pandemic and a full return to in person learning, how likely are you to use online exam proctoring tools for these assessments?")
+describe(yesEducatorData$likelyFullReturnToInPerson.is_likely, "Q17: is likely")
+describe(yesEducatorData$likelyFullReturnToInPerson.is_unlikely, "Q17: is unlikely")
+
+# Q19	RQ1	Descriptive	5pt Agreement			The use of online exam proctoring tools makes it less likely that my students will cheat on an exam.
+describe(yesEducatorData$thinkLessCheating, "Q19: The use of online exam proctoring tools makes it less likely that my students will cheat on an exam.")
+describe(yesEducatorData$thinkOneLessCheating.agree)
+describe(yesEducatorData$thinkOneLessCheating.disagree)
+
+# Q20	RQ1	Descriptive	0-100% I believe that online proctoring will catch cheating this percent of the time when students are actually cheating:
+describe(yesEducatorData$cheatingPercentage)
+describe(yesEducatorData$cheatingPercentage.more_than_half)
+describe(yesEducatorData$cheatingPercentage.less_than_half)
+
+# Q21	RQ1	Descriptive	Yes/No/Unsure			Did [online exam proctoring service name] report any potential cheating during an exam?
+describe(yesEducatorData$potentialCheating)
+describe(yesEducatorData$potentialCheating.yes)
+describe(yesEducatorData$potentialCheating.no)
+
+# thinkOneLessCheating.agree +
+# cheatingPercentage.more_than_half +
+# yesEducatorData$potentialCheating.yes
+
+# Q22	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+describe(yesEducatorData$thinkPrivacyInvasive)
+
+# Q23	RQ2	Descriptive	5pt Agreement			I think [online exam proctoring service name] offers a reasonable tradeoff between student privacy and the integrity of the exam
+describe(yesEducatorData$thinkReasonableTradeoff)
+
+
+# Q24	RQ2	Descriptive	5pt Agreement			I am concerned about the risks to student privacy by using [online exam proctoring service name].
+describe(yesEducatorData$thinkRiskToPrivacy)
+
+
+# Q25	RQ2	Descriptive	5pt Agreement			I think [online exam proctoring service name] is a good solution for monitoring remote examinations.
+describe(yesEducatorData$thinkGoodSolution)
+
+
+# Q27
+describe(yesEducatorData$concernAboutSoftware, "Q27: How concerned are you about students installing software created by [online exam proctoring service name] on their personal computers?")
+
+# Q30 
+describe(yesEducatorData$wouldYouUseSameOptions, "Q30: If you were to administer another online proctored exam would you enable the same monitoring options again?")
+
+
+# Q33
+describe(yesEducatorData$monitorLiveProctorVisible)
+describe(yesEducatorData$monitorLiveProctorVisible.is_comfortable)
+describe(yesEducatorData$monitorLiveProctorVisible.not_comfortable)
+
+describe(yesEducatorData$monitorLiveProctorNotVisible)
+describe(yesEducatorData$monitorLiveProctorNotVisible.is_comfortable)
+describe(yesEducatorData$monitorLiveProctorNotVisible.not_comfortable)
+
+describe(yesEducatorData$monitorWebBrowserHistory)
+describe(yesEducatorData$monitorWebBrowserHistory.is_comfortable)
+describe(yesEducatorData$monitorWebBrowserHistory.not_comfortable)
+
+describe(yesEducatorData$monitorEyeMovementTracking)
+describe(yesEducatorData$monitorEyeMovementTracking.is_comfortable)
+describe(yesEducatorData$monitorEyeMovementTracking.not_comfortable)
+
+describe(yesEducatorData$monitorFaceDetection)
+describe(yesEducatorData$monitorFaceDetection.is_comfortable)
+describe(yesEducatorData$monitorFaceDetection.not_comfortable)
+
+describe(yesEducatorData$monitorLockdownBrowser)
+describe(yesEducatorData$monitorLockdownBrowser.is_comfortable)
+describe(yesEducatorData$monitorLockdownBrowser.not_comfortable)
+
+describe(yesEducatorData$monitorMouseMovementTracking)
+describe(yesEducatorData$monitorMouseMovementTracking.is_comfortable)
+describe(yesEducatorData$monitorMouseMovementTracking.not_comfortable)
+
+describe(yesEducatorData$monitorKeyboardRestrictions)
+describe(yesEducatorData$monitorKeyboardRestrictions.is_comfortable)
+describe(yesEducatorData$monitorKeyboardRestrictions.not_comfortable)
+
+describe(yesEducatorData$monitorScreenRecording)
+describe(yesEducatorData$monitorScreenRecording.is_comfortable)
+describe(yesEducatorData$monitorScreenRecording.not_comfortable)
+
+describe(yesEducatorData$monitorMicrophoneRecording)
+describe(yesEducatorData$monitorMicrophoneRecording.is_comfortable)
+describe(yesEducatorData$monitorMicrophoneRecording.not_comfortable)
+
+describe(yesEducatorData$monitorInternetActivityMonitoring)
+describe(yesEducatorData$monitorInternetActivityMonitoring.is_comfortable)
+describe(yesEducatorData$monitorInternetActivityMonitoring.not_comfortable)
+
+describe(yesEducatorData$monitorWebcamRecording)
+describe(yesEducatorData$monitorWebcamRecording.is_comfortable)
+describe(yesEducatorData$monitorWebcamRecording.not_comfortable)
+
+# Q34
+describe(yesEducatorData$studentFullName)
+describe(yesEducatorData$studentFullName.is_concerned)
+describe(yesEducatorData$studentFullName.not_concerned)
+
+describe(yesEducatorData$studentDateOfBirth)
+describe(yesEducatorData$studentDateOfBirth.is_concerned)
+describe(yesEducatorData$studentDateOfBirth.not_concerned)
+
+describe(yesEducatorData$studentPhotoId)
+describe(yesEducatorData$studentPhotoId.is_concerned)
+describe(yesEducatorData$studentPhotoId.not_concerned)
+
+describe(yesEducatorData$studentSocialSecurityNumber)
+describe(yesEducatorData$studentSocialSecurityNumber.is_concerned)
+describe(yesEducatorData$studentSocialSecurityNumber.not_concerned)
+
+describe(yesEducatorData$studentStreetAddress)
+describe(yesEducatorData$studentStreetAddress.is_concerned)
+describe(yesEducatorData$studentStreetAddress.not_concerned)
+
+describe(yesEducatorData$studentCoordinates)
+describe(yesEducatorData$studentCoordinates.is_concerned)
+describe(yesEducatorData$studentCoordinates.not_concerned)
+
+describe(yesEducatorData$studentAudioRecording)
+describe(yesEducatorData$studentAudioRecording.is_concerned)
+describe(yesEducatorData$studentAudioRecording.not_concerned)
+
+describe(yesEducatorData$studentVideoRecording)
+describe(yesEducatorData$studentVideoRecording.is_concerned)
+describe(yesEducatorData$studentVideoRecording.not_concerned)
+
+describe(yesEducatorData$studentScreenView)
+describe(yesEducatorData$studentScreenView.is_concerned)
+describe(yesEducatorData$studentScreenView.not_concerned)
+
+describe(yesEducatorData$studentRoomScan)
+describe(yesEducatorData$studentRoomScan.is_concerned)
+describe(yesEducatorData$studentRoomScan.not_concerned)
+
+describe(yesEducatorData$studentApplicationRecord)
+describe(yesEducatorData$studentApplicationRecord.is_concerned)
+describe(yesEducatorData$studentApplicationRecord.not_concerned)
+
+regressionTables.colNameMappings <- c(
+  "Factor" = "term",
+  "Estimate" = "estimate",
+  "Odds ratio" = "OR",
+  "Error" = "std.error",
+  "t value" = "t.value",
+  "z value" = "z.value",
+  "Conf. int." = "conf.int",
+  "Pr(>|z|)" = "p.value",
+  " " = "signif"
+)
+
+regressionTables.colNameMappings.latex <- c(
+  "Factor" = "term",
+  "Estimate" = "estimate",
+  "Odds ratio" = "OR",
+  "Error" = "std.error",
+  "t value" = "t.value",
+  "z value" = "z.value",
+  "Conf. int." = "conf.int",
+  "Pr(\\textgreater\\textbar z\\textbar)" = "p.value",
+  " " = "signif"
+)
+
+
+# Read main survey results from csv to a data frame and set it up
+concernData <- read.csv("./data/yes_educator.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+   
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    q34 = across(all_of(c("Q34_1", "Q34_2", "Q34_3", "Q34_4", "Q34_5", "Q34_6", "Q34_7", "Q34_8", "Q34_9", "Q34_10", "Q34_11")), ordered, levels = factorLevels$concern2),
+#   concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    
+    studentFullName = ordered(Q34_1, levels = factorLevels$concern2), 
+    studentDateOfBirth = ordered(Q34_2, levels = factorLevels$concern2), 
+    studentPhotoId = ordered(Q34_3, levels = factorLevels$concern2), 
+    studentSocialSecurityNumber = ordered(Q34_4, levels = factorLevels$concern2), 
+    studentStreetAddress = ordered(Q34_5, levels = factorLevels$concern2), 
+    studentCoordinates = ordered(Q34_6, levels = factorLevels$concern2), 
+    studentAudioRecording = ordered(Q34_7, levels = factorLevels$concern2), 
+    studentVideoRecording = ordered(Q34_8, levels = factorLevels$concern2), 
+    studentScreenView = ordered(Q34_9, levels = factorLevels$concern2), 
+    studentRoomScan = ordered(Q34_10, levels = factorLevels$concern2), 
+    studentApplicationRecord = ordered(Q34_11, levels = factorLevels$concern2) 
+  ) %>%
+  ungroup()
+
+
+# Read main survey results from csv to a data frame and set it up
+q33Data <- read.csv("./data/q33_q29.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q33_1 - Q33_12
+    # For each exam monitoring type please select how comfortable you would feel about using it to monitor students during online proctored exams in your course.
+    q33 = across(all_of(c("Q33_1", "Q33_2", "Q33_3", "Q33_4", "Q33_5", "Q33_6", "Q33_7", "Q33_8", "Q33_9", "Q33_10", "Q33_11", "Q33_12")), ordered, levels = factorLevels$comfort3),
+    
+    monitorLiveProctorVisible = ordered(Q33_1, levels = factorLevels$comfort3),
+    monitorLiveProctorNotVisible = ordered(Q33_2, levels = factorLevels$comfort3),
+    monitorWebBrowserHistory = ordered(Q33_3, levels = factorLevels$comfort3),
+    monitorEyeMovementTracking = ordered(Q33_4, levels = factorLevels$comfort3),
+    monitorFaceDetection = ordered(Q33_5, levels = factorLevels$comfort3),
+    monitorLockdownBrowser = ordered(Q33_6, levels = factorLevels$comfort3),
+    monitorMouseMovementTracking = ordered(Q33_7, levels = factorLevels$comfort3),
+    monitorKeyboardRestrictions = ordered(Q33_8, levels = factorLevels$comfort3),
+    monitorScreenRecording = ordered(Q33_9, levels = factorLevels$comfort3),
+    monitorMicrophoneRecording = ordered(Q33_10, levels = factorLevels$comfort3),
+    monitorInternetActivityMonitoring = ordered(Q33_11, levels = factorLevels$comfort3),
+    monitorWebcamRecording = ordered(Q33_12, levels = factorLevels$comfort3)
+    
+  ) %>%
+  ungroup()
+  
+summary(q33Data)
+# Q33
+describe(q33Data$monitorLiveProctorVisible)
+describe(q33Data$monitorLiveProctorNotVisible)
+describe(q33Data$monitorWebBrowserHistory)
+describe(q33Data$monitorEyeMovementTracking)
+describe(q33Data$monitorFaceDetection)
+describe(q33Data$monitorLockdownBrowser)
+describe(q33Data$monitorMouseMovementTracking)
+describe(q33Data$monitorKeyboardRestrictions)
+describe(q33Data$monitorScreenRecording)
+describe(q33Data$monitorMicrophoneRecording)
+describe(q33Data$monitorInternetActivityMonitoring)
+describe(q33Data$monitorWebcamRecording)
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q27Data <- read.csv("./data/q27.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q27
+    q27 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$comfort3),
+    
+    installExamsoft = ordered(Examsoft, levels = factorLevels$concern),
+    installProctorU = ordered(ProctorU, levels = factorLevels$concern),
+    installRespondus = ordered(Respondus, levels = factorLevels$concern),
+    installRPNow = ordered(RPNow, levels = factorLevels$concern),
+    installOther = ordered(Other, levels = factorLevels$concern),
+    installTotal = ordered(Total, levels = factorLevels$concern)
+    
+  ) %>%
+  ungroup()
+  
+summary(q27Data)
+# Q27
+describe(q27Data$installExamsoft)
+describe(q27Data$installProctorU)
+describe(q27Data$installRespondus)
+describe(q27Data$installRPNow)
+describe(q27Data$installOther)
+describe(q27Data$installTotal)
+
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q21Data <- read.csv("./data/q21.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q21	RQ1	Descriptive	Yes/No/Unsure			Did [online exam proctoring service name] report any potential cheating during an exam?
+    # yesNoImUnsure = c("Yes", "No", "I'm Unsure"),
+    q21 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$yesNoImUnsure),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$yesNoImUnsure),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$yesNoImUnsure),
+    toolRespondus = ordered(Respondus, levels = factorLevels$yesNoImUnsure),
+    toolRPNow = ordered(RPNow, levels = factorLevels$yesNoImUnsure),
+    toolOther = ordered(Other, levels = factorLevels$yesNoImUnsure),
+    toolTotal = ordered(Total, levels = factorLevels$yesNoImUnsure)
+    
+  ) %>%
+  ungroup()
+  
+summary(q21Data)
+# Q21
+describe(q21Data$toolExamsoft)
+describe(q21Data$toolProctorU)
+describe(q21Data$toolRespondus)
+describe(q21Data$toolRPNow)
+describe(q21Data$toolOther)
+describe(q21Data$toolTotal)
+
+# Read main survey results from csv to a data frame and set it up
+n1Data <- read.csv("./data/n1_flat.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # N1: Did you consider using any online exam proctoring tools?
+    # yesNoImUnsure = c("Yes", "No", "I'm Unsure"),
+    n1 = across(all_of(c("ArtsSciences", "PublicHealth", "InternationalAffairs", "Business", "EngineeringAppliedSci", "Education", "Medicine", "ProfessionalStudies", "Other", "ArtsDesign", "PoliticalManagement", "PublicAffairs", "Nursing", "Total")), ordered, levels = factorLevels$yesNoImUnsure),
+    
+    schoolArtsSciences = ordered(ArtsSciences, levels = factorLevels$yesNoImUnsure),
+    schooPublicHealth = ordered(PublicHealth, levels = factorLevels$yesNoImUnsure),
+    schoolInternationalAffairs = ordered(InternationalAffairs, levels = factorLevels$yesNoImUnsure),
+    schoolBusiness = ordered(Business, levels = factorLevels$yesNoImUnsure),
+    schoolEngineeringAppliedSci = ordered(EngineeringAppliedSci, levels = factorLevels$yesNoImUnsure),
+    schoolEducation = ordered(Education, levels = factorLevels$yesNoImUnsure),
+    schoolMedicine = ordered(Medicine, levels = factorLevels$yesNoImUnsure),
+    schoolProfessionalStudies = ordered(ProfessionalStudies, levels = factorLevels$yesNoImUnsure),
+    schoolOther = ordered(Other, levels = factorLevels$yesNoImUnsure),
+    schoolArtsDesign = ordered(ArtsDesign, levels = factorLevels$yesNoImUnsure),
+    schoolPoliticalManagement = ordered(PoliticalManagement, levels = factorLevels$yesNoImUnsure),
+    schoolPublicAffairs = ordered(PublicAffairs, levels = factorLevels$yesNoImUnsure),
+    schoolNursing = ordered(Nursing, levels = factorLevels$yesNoImUnsure),
+    schoolTotal = ordered(Total, levels = factorLevels$yesNoImUnsure),
+    
+  ) %>%
+  ungroup()
+  
+summary(n1Data)
+
+# N1
+describe(n1Data$schoolArtsSciences)
+describe(n1Data$schooPublicHealth)
+describe(n1Data$schoolInternationalAffairs)
+describe(n1Data$schoolBusiness)
+describe(n1Data$schoolEngineeringAppliedSci)
+describe(n1Data$schoolEducation)
+describe(n1Data$schoolMedicine)
+describe(n1Data$schoolProfessionalStudies)
+describe(n1Data$schoolOther)
+describe(n1Data$schoolArtsDesign)
+describe(n1Data$schoolPoliticalManagement)
+describe(n1Data$schoolPublicAffairs)
+describe(n1Data$schoolNursing)
+describe(n1Data$schoolTotal)
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q19Data <- read.csv("./data/q19.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q22	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    q19 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$agreement2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$agreement2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$agreement2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$agreement2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$agreement2),
+    toolOther = ordered(Other, levels = factorLevels$agreement2),
+    toolTotal = ordered(Total, levels = factorLevels$agreement2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q19Data)
+# Q22
+describe(q19Data$toolExamsoft)
+describe(q19Data$toolProctorU)
+describe(q19Data$toolRespondus)
+describe(q19Data$toolRPNow)
+describe(q19Data$toolOther)
+describe(q19Data$toolTotal)
+
+
+# Read main survey results from csv to a data frame and set it up
+q22Data <- read.csv("./data/q22.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q22	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    q22 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$agreement2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$agreement2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$agreement2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$agreement2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$agreement2),
+    toolOther = ordered(Other, levels = factorLevels$agreement2),
+    toolTotal = ordered(Total, levels = factorLevels$agreement2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q22Data)
+# Q22
+describe(q22Data$toolExamsoft)
+describe(q22Data$toolProctorU)
+describe(q22Data$toolRespondus)
+describe(q22Data$toolRPNow)
+describe(q22Data$toolOther)
+describe(q22Data$toolTotal)
+
+# Read main survey results from csv to a data frame and set it up
+q23Data <- read.csv("./data/q23.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # q23	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    q23 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$agreement2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$agreement2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$agreement2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$agreement2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$agreement2),
+    toolOther = ordered(Other, levels = factorLevels$agreement2),
+    toolTotal = ordered(Total, levels = factorLevels$agreement2)
+    
+    
+  ) %>%
+  ungroup()
+  
+summary(q23Data)
+# q23
+describe(q23Data$toolExamsoft)
+describe(q23Data$toolProctorU)
+describe(q23Data$toolRespondus)
+describe(q23Data$toolRPNow)
+describe(q23Data$toolOther)
+describe(q23Data$toolTotal)
+
+# Read main survey results from csv to a data frame and set it up
+q24Data <- read.csv("./data/q24.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # q24	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    q24 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$agreement2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$agreement2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$agreement2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$agreement2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$agreement2),
+    toolOther = ordered(Other, levels = factorLevels$agreement2),
+    toolTotal = ordered(Total, levels = factorLevels$agreement2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q24Data)
+# q24
+describe(q24Data$toolExamsoft)
+describe(q24Data$toolProctorU)
+describe(q24Data$toolRespondus)
+describe(q24Data$toolRPNow)
+describe(q24Data$toolOther)
+describe(q24Data$toolTotal)
+
+# Read main survey results from csv to a data frame and set it up
+q25Data <- read.csv("./data/q25.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # q25	RQ2	Descriptive	5pt Agreement			I think the [online exam proctoring service name] is privacy invasive.
+    # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+    q25 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total")), ordered, levels = factorLevels$agreement2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$agreement2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$agreement2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$agreement2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$agreement2),
+    toolOther = ordered(Other, levels = factorLevels$agreement2),
+    toolTotal = ordered(Total, levels = factorLevels$agreement2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q25Data)
+# q25
+describe(q25Data$toolExamsoft)
+describe(q25Data$toolProctorU)
+describe(q25Data$toolRespondus)
+describe(q25Data$toolRPNow)
+describe(q25Data$toolOther)
+describe(q25Data$toolTotal)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_1_data <- read.csv("./data/q34_1.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_1_data)
+
+# Q34
+describe(q34_1_data$toolExamsoft)
+describe(q34_1_data$toolProctorU)
+describe(q34_1_data$toolRespondus)
+describe(q34_1_data$toolRPNow)
+describe(q34_1_data$toolOther)
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_2_data <- read.csv("./data/q34_2.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_2_data)
+
+# Q34
+describe(q34_2_data$toolExamsoft)
+describe(q34_2_data$toolProctorU)
+describe(q34_2_data$toolRespondus)
+describe(q34_2_data$toolRPNow)
+describe(q34_2_data$toolOther)
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_3_data <- read.csv("./data/q34_3.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_3_data)
+
+# Q34
+describe(q34_3_data$toolExamsoft)
+describe(q34_3_data$toolProctorU)
+describe(q34_3_data$toolRespondus)
+describe(q34_3_data$toolRPNow)
+describe(q34_3_data$toolOther)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_4_data <- read.csv("./data/q34_4.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_4_data)
+
+# Q34
+describe(q34_4_data$toolExamsoft)
+describe(q34_4_data$toolProctorU)
+describe(q34_4_data$toolRespondus)
+describe(q34_4_data$toolRPNow)
+describe(q34_4_data$toolOther)
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_5_data <- read.csv("./data/q34_5.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_5_data)
+
+# Q34
+describe(q34_5_data$toolExamsoft)
+describe(q34_5_data$toolProctorU)
+describe(q34_5_data$toolRespondus)
+describe(q34_5_data$toolRPNow)
+describe(q34_5_data$toolOther)
+
+# Read main survey results from csv to a data frame and set it up
+q34_6_data <- read.csv("./data/q34_6.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_6_data)
+
+# Q34
+describe(q34_6_data$toolExamsoft)
+describe(q34_6_data$toolProctorU)
+describe(q34_6_data$toolRespondus)
+describe(q34_6_data$toolRPNow)
+describe(q34_6_data$toolOther)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_7_data <- read.csv("./data/q34_7.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_7_data)
+
+# Q34
+describe(q34_7_data$toolExamsoft)
+describe(q34_7_data$toolProctorU)
+describe(q34_7_data$toolRespondus)
+describe(q34_7_data$toolRPNow)
+describe(q34_7_data$toolOther)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_8_data <- read.csv("./data/q34_8.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_8_data)
+
+# Q34
+describe(q34_8_data$toolExamsoft)
+describe(q34_8_data$toolProctorU)
+describe(q34_8_data$toolRespondus)
+describe(q34_8_data$toolRPNow)
+describe(q34_8_data$toolOther)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_9_data <- read.csv("./data/q34_9.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_9_data)
+
+# Q34
+describe(q34_9_data$toolExamsoft)
+describe(q34_9_data$toolProctorU)
+describe(q34_9_data$toolRespondus)
+describe(q34_9_data$toolRPNow)
+describe(q34_9_data$toolOther)
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_10_data <- read.csv("./data/q34_10.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_10_data)
+
+# Q34
+describe(q34_10_data$toolExamsoft)
+describe(q34_10_data$toolProctorU)
+describe(q34_10_data$toolRespondus)
+describe(q34_10_data$toolRPNow)
+describe(q34_10_data$toolOther)
+
+
+
+
+# Read main survey results from csv to a data frame and set it up
+q34_11_data <- read.csv("./data/q34_11.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    
+    # Q34_1 - Q34_11
+    # Many online proctoring tools require students to share information with the exam proctoring companies. 
+    # For each type of information below indicate whether you would be concerned by students sharing this information with exam proctoring companies. 
+    # concern2 = c("Not at all Concerned", "Slightly Concerned", "Somewhat Concerned", "Moderately Concerned", "Extremely Concerned"),
+    q34 = across(all_of(c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other")), ordered, levels = factorLevels$concern2),
+    
+    toolExamsoft = ordered(Examsoft, levels = factorLevels$concern2),
+    toolProctorU = ordered(ProctorU, levels = factorLevels$concern2),
+    toolRespondus = ordered(Respondus, levels = factorLevels$concern2),
+    toolRPNow = ordered(RPNow, levels = factorLevels$concern2),
+    toolOther = ordered(Other, levels = factorLevels$concern2)
+    
+  ) %>%
+  ungroup()
+  
+summary(q34_11_data)
+
+# Q34
+describe(q34_11_data$toolExamsoft)
+describe(q34_11_data$toolProctorU)
+describe(q34_11_data$toolRespondus)
+describe(q34_11_data$toolRPNow)
+describe(q34_11_data$toolOther)
+
+##### Regression
+likelySimilarToFall2020Spring2021Glm <- glm(likelySimilarToFall2020Spring2021.is_likely ~
+                                            monitorLiveProctorVisible.is_comfortable +          
+                                            monitorLiveProctorNotVisible.is_comfortable +      
+                                            monitorInternetActivityMonitoring.is_comfortable + 
+                                            monitorWebcamRecording.is_comfortable +            
+                                            studentStreetAddress.not_concerned +            
+                                            thinkOneLessCheating.agree 
+                                            , data=yesEducatorData, family = binomial
+)
+
+summary(likelySimilarToFall2020Spring2021Glm)
+
+print(str_glue('Pseudo R^2: {aldrich_nelson_pR2(likelySimilarToFall2020Spring2021Glm, glm("likelySimilarToFall2020Spring2021.is_likely ~ 1" ,data = yesEducatorData))}'))
+
+# Summary of the model
+likelySimilarToFall2020Spring2021Glm %>% tidy() %>%
+  rename("z.value" = "statistic") %>%
+  mutate(OR = exp(estimate), .after = estimate) %>%
+  mutate(signif = case_when(p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*",
+                            p.value < 0.1 ~ ".", p.value >= 0.1 ~ "")) %>%
+  rename(any_of(regressionTables.colNameMappings.latex)) %>%
+  xtable(
+    display = c("d", "s", "f", "e", "f", "f", "e", "s"),
+    digits = c(1, 1, 2, -2, 2, 2, -2, 1),
+    align = c("", "l", "r", "@{\\extracolsep{\\fill}}r", "l", "r", "l", "@{\\,}l")
+  ) %>%
+  print(
+    n = Inf,
+    file = "./tables/likelySimilarToFall2020Spring2021Glm-regression.tex",
+    floating.environment = "table*",
+    table.placement = "htbp",
+    caption.placement = "top",
+    booktabs = TRUE,
+    include.rownames=FALSE,
+    tabular.environment = "tabular*",
+    width = "\\textwidth",
+    sanitize.text.function = function(x){x},
+    sanitize.colnames.function = function(x) {str_glue("{{\\textbf{{{x}}}}}")}
+  )
+
+
+
+
+### Regression
+likelyCurrentCircumstancesFall2021Glm <- glm(likelyCurrentCircumstancesFall2021.is_likely ~
+                                            monitorLiveProctorVisible.is_comfortable +          
+                                            monitorLiveProctorNotVisible.is_comfortable +        
+                                            monitorWebBrowserHistory.is_comfortable  +          
+                                            monitorFaceDetection.is_comfortable +              
+                                            monitorMouseMovementTracking.is_comfortable +         
+                                            studentRoomScan.not_concerned  
+                                            , data=yesEducatorData, family = binomial
+)
+
+summary(likelyCurrentCircumstancesFall2021Glm)
+
+print(str_glue('Pseudo R^2: {aldrich_nelson_pR2(likelyCurrentCircumstancesFall2021Glm, glm("likelyCurrentCircumstancesFall2021.is_likely ~ 1" ,data = yesEducatorData))}'))
+
+# Summary of the model
+likelyCurrentCircumstancesFall2021Glm %>% tidy() %>%
+  rename("z.value" = "statistic") %>%
+  mutate(OR = exp(estimate), .after = estimate) %>%
+  mutate(signif = case_when(p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*",
+                            p.value < 0.1 ~ ".", p.value >= 0.1 ~ "")) %>%
+  rename(any_of(regressionTables.colNameMappings.latex)) %>%
+  xtable(
+    display = c("d", "s", "f", "e", "f", "f", "e", "s"),
+    digits = c(1, 1, 2, -2, 2, 2, -2, 1),
+    align = c("", "l", "r", "@{\\extracolsep{\\fill}}r", "l", "r", "l", "@{\\,}l")
+  ) %>%
+  print(
+    n = Inf,
+    file = "./tables/likelyCurrentCircumstancesFall2021Glm-regression.tex",
+    floating.environment = "table*",
+    table.placement = "htbp",
+    caption.placement = "top",
+    booktabs = TRUE,
+    include.rownames=FALSE,
+    tabular.environment = "tabular*",
+    width = "\\textwidth",
+    sanitize.text.function = function(x){x},
+    sanitize.colnames.function = function(x) {str_glue("{{\\textbf{{{x}}}}}")}
+  )
+
+
+## Regression
+likelyFullReturnToInPersonGlm <- glm(likelyFullReturnToInPerson.is_likely ~
+                                            monitorLiveProctorVisible.is_comfortable   +              
+                                            monitorEyeMovementTracking.is_comfortable +
+                                            monitorFaceDetection.is_comfortable +                             
+                                            monitorMouseMovementTracking.is_comfortable +          
+                                            monitorInternetActivityMonitoring.is_comfortable +    
+                                            studentFullName.not_concerned   +                   
+                                            studentPhotoId.not_concerned                      
+                                            , data=yesEducatorData, family = binomial
+)
+
+summary(likelyFullReturnToInPersonGlm)
+
+print(str_glue('Pseudo R^2: {aldrich_nelson_pR2(likelyFullReturnToInPersonGlm, glm("likelyFullReturnToInPerson.is_likely ~ 1" ,data = yesEducatorData))}'))
+
+# Summary of the model
+likelyFullReturnToInPersonGlm %>% tidy() %>%
+  rename("z.value" = "statistic") %>%
+  mutate(OR = exp(estimate), .after = estimate) %>%
+  mutate(signif = case_when(p.value < 0.001 ~ "***", p.value < 0.01 ~ "**", p.value < 0.05 ~ "*",
+                            p.value < 0.1 ~ ".", p.value >= 0.1 ~ "")) %>%
+  rename(any_of(regressionTables.colNameMappings.latex)) %>%
+  xtable(
+    display = c("d", "s", "f", "e", "f", "f", "e", "s"),
+    digits = c(1, 1, 2, -2, 2, 2, -2, 1),
+    align = c("", "l", "r", "@{\\extracolsep{\\fill}}r", "l", "r", "l", "@{\\,}l")
+  ) %>%
+  print(
+    n = Inf,
+    file = "./tables/likelyFullReturnToInPersonGlm-regression.tex",
+    floating.environment = "table*",
+    table.placement = "htbp",
+    caption.placement = "top",
+    booktabs = TRUE,
+    include.rownames=FALSE,
+    tabular.environment = "tabular*",
+    width = "\\textwidth",
+    sanitize.text.function = function(x){x},
+    sanitize.colnames.function = function(x) {str_glue("{{\\textbf{{{x}}}}}")}
+  )
+
+
+
+# Read app install date results from csv to a data frame and set it up
+q29ColumnData <- read.csv("./data/q29_column.csv", header = TRUE, sep = ",", encoding="UTF-8")
+q29ColumnData
+summary(q29ColumnData)
+
+
+q29df <- data.frame(
+  monitoring = factor(c("Lockdown Browser", "Webcam Recording", "Microphone Recording", "Face Detection", "Screen Recording", "Eye Movement Tracking", "Live Proctor Visible", "Internet Activity Monitoring", "Live Proctor Not Visible", "Keyboard Restrictions", "Web Browser History", "Other", "Mouse Movement Tracking"), levels=c("Lockdown Browser", "Webcam Recording", "Microphone Recording", "Face Detection", "Screen Recording", "Eye Movement Tracking", "Live Proctor Visible", "Internet Activity Monitoring", "Live Proctor Not Visible", "Keyboard Restrictions", "Web Browser History", "Other", "Mouse Movement Tracking")),
+  enabled = c(21, 13, 11, 11, 8, 8, 7, 7, 3, 3, 2, 2, 1),
+  prc = c(0.8077,	0.5000,	0.4231,	0.4231,	0.3077,	0.3077,	0.2692,	0.2692,	0.1154,	0.1154,	0.0769,	0.0769,	0.0385)
+) 
+describe(q29df)
+
+# Read main survey results from csv to a data frame and set it up
+q29Data <- read.csv("./data/q29.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q29_1: 
+    monitorLiveProctorVisible = ordered(Q29_1, levels = factorLevels$yesNo),
+    # Q29_2: 
+    monitorLiveProctorNotVisible = ordered(Q29_2, levels = factorLevels$yesNo),
+    # Q29_3: 
+    monitorWebBrowserHistory = ordered(Q29_3, levels = factorLevels$yesNo),
+    # Q29_4: 
+    monitorEyeMovementTracking = ordered(Q29_4, levels = factorLevels$yesNo),
+    # Q29_5: 
+    monitorFaceDetection = ordered(Q29_5, levels = factorLevels$yesNo),
+    # Q29_6: 
+    monitorLockdownBrowser = ordered(Q29_6, levels = factorLevels$yesNo),
+    # Q29_7: 
+    monitorMouseMovementTracking = ordered(Q29_7, levels = factorLevels$yesNo),
+    # Q29_8: 
+    monitorKeyboardRestrictions = ordered(Q29_8, levels = factorLevels$yesNo),
+    # Q29_9: 
+    monitorScreenRecording = ordered(Q29_9, levels = factorLevels$yesNo),
+    # Q29_10: 
+    monitorMicrophoneRecording = ordered(Q29_10, levels = factorLevels$yesNo),
+    # Q29_11: 
+    monitorInternetActivityMonitoring = ordered(Q29_11, levels = factorLevels$yesNo),
+    # Q29_12: 
+    monitorWebcamRecording = ordered(Q29_12, levels = factorLevels$yesNo),
+    # Q29_13: 
+    # monitorIDoNotKnow = ordered(Q29_13, levels = factorLevels$yesNo),
+    # Q29_14: 
+    monitorOther = ordered(Q29_14, levels = factorLevels$yesNo)
+
+  ) %>%
+  ungroup()
+
+# Q29
+describe(q29Data$monitorLiveProctorVisible)
+describe(q29Data$monitorLiveProctorNotVisible)
+describe(q29Data$monitorWebBrowserHistory)
+describe(q29Data$monitorEyeMovementTracking)
+describe(q29Data$monitorFaceDetection)
+describe(q29Data$monitorLockdownBrowser)
+describe(q29Data$monitorMouseMovementTracking)
+describe(q29Data$monitorKeyboardRestrictions)
+describe(q29Data$monitorScreenRecording)
+describe(q29Data$monitorMicrophoneRecording)
+describe(q29Data$monitorInternetActivityMonitoring)
+describe(q29Data$monitorWebcamRecording)
+describe(q29Data$monitorOther)
+
+# Read main survey results from csv to a data frame and set it up
+q29EnabledData <- read.csv("./data/q29_flat.csv", header = TRUE, sep = ",", encoding="UTF-8") %>%
+  # Convert all categorical variables to R factors
+  mutate(
+    # Q29_1: 
+    monitorLiveProctorVisible = ordered(Q29_1, levels = factorLevels$enabled),
+    # Q29_2: 
+    monitorLiveProctorNotVisible = ordered(Q29_2, levels = factorLevels$enabled),
+    # Q29_3: 
+    monitorWebBrowserHistory = ordered(Q29_3, levels = factorLevels$enabled),
+    # Q29_4: 
+    monitorEyeMovementTracking = ordered(Q29_4, levels = factorLevels$enabled),
+    # Q29_5: 
+    monitorFaceDetection = ordered(Q29_5, levels = factorLevels$enabled),
+    # Q29_6: 
+    monitorLockdownBrowser = ordered(Q29_6, levels = factorLevels$enabled),
+    # Q29_7: 
+    monitorMouseMovementTracking = ordered(Q29_7, levels = factorLevels$enabled),
+    # Q29_8: 
+    monitorKeyboardRestrictions = ordered(Q29_8, levels = factorLevels$enabled),
+    # Q29_9: 
+    monitorScreenRecording = ordered(Q29_9, levels = factorLevels$enabled),
+    # Q29_10: 
+    monitorMicrophoneRecording = ordered(Q29_10, levels = factorLevels$enabled),
+    # Q29_11: 
+    monitorInternetActivityMonitoring = ordered(Q29_11, levels = factorLevels$enabled),
+    # Q29_12: 
+    monitorWebcamRecording = ordered(Q29_12, levels = factorLevels$enabled),
+    # Q29_13: 
+    #monitorIDoNotKnow = ordered(Q29_13, levels = factorLevels$enabled),
+    # Q29_14: 
+    monitorOther = ordered(Q29_14, levels = factorLevels$enabled)
+
+  ) %>%
+  ungroup()
+
+# Q29
+describe(q29EnabledData$monitorLiveProctorVisible)
+describe(q29EnabledData$monitorLiveProctorNotVisible)
+describe(q29EnabledData$monitorWebBrowserHistory)
+describe(q29EnabledData$monitorEyeMovementTracking)
+describe(q29EnabledData$monitorFaceDetection)
+describe(q29EnabledData$monitorLockdownBrowser)
+describe(q29EnabledData$monitorMouseMovementTracking)
+describe(q29EnabledData$monitorKeyboardRestrictions)
+describe(q29EnabledData$monitorScreenRecording)
+describe(q29EnabledData$monitorMicrophoneRecording)
+describe(q29EnabledData$monitorInternetActivityMonitoring)
+describe(q29EnabledData$monitorWebcamRecording)
+describe(q29EnabledData$monitorOther)
+
+```
+
+
+# Plots
+```{r no_branch_consider_any_online_n1_bar_plot, echo=FALSE}
+p <- noEducatorData %>%
+  pivot_longer(c(noBranchConsiderAnyOnline),
+               names_to = "question",
+               names_transform = list("question" = ~ ordered(.x, levels = c("noBranchConsiderAnyOnline"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = "question", fill = fct_relevel(responses, "I'm Unsure", after = 1), xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  labs("title" = str_wrap("Did you consider using any online exam proctoring tools?", 35)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.1))
+ggsave("./figures/no_branch_consider_any_online_n1.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+```{r no_branch_how_likely_online_exam_n5_bar_plot, echo=FALSE}
+p <- noEducatorData %>%
+  ggplot(aes(y = "noBranchHowLikelyOnlineExam", fill = noBranchHowLikelyOnlineExam, xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_brewer(palette = "RdYlBu", labels = function(x){str_trunc(x, 38)}) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  labs("title" = str_wrap("If you were teaching remotely under the similar circumstances to those of the 2020/2021 academic year, and you decided to administer an exam online, how likely are you to use online exam proctoring tools?", 45)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/no_branch_how_likely_online_exam_n5.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+```{r use_exam_proctoring_q6_bar_plot, echo=FALSE}
+p <- yesNoEducatorData %>%
+  pivot_longer(c(didYouUseOnlineProctoring),
+               names_to = "question",
+               names_transform = list("question" = ~ ordered(.x, levels = c("didYouUseOnlineProctoring"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = "question", fill = fct_relevel(responses, "I'm Unsure", after = 1), xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  labs("title" = str_wrap("Did you use any online exam proctoring tools to assist in administering any exams or assignments during the Fall 2020/Spring 2021 academic year?", 40)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.1))
+ggsave("./figures/use_exam_proctoring_q6.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+
+```{r number_of_exams_q10_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  ggplot(aes(y = "numberOfExams", fill = numberOfExams, xmin = 0, xmax = 1)) +
+  #geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #facet_wrap(question~., ncol = 1, labeller = labeller("question" = as_labeller(function(x){str_wrap(questionsStrings[x], 60)}))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1") +
+  #guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  labs("title" = str_wrap("How many online proctored assessments have you administered?", 40)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    #plot.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    # axis.text.y = element_text(size = 6),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    # legend.text = element_text(size = 6),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/number_of_exams_q10.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+
+```{r likely_to_use_alluvium_plot, echo=FALSE}
+
+temp <- yesEducatorData %>%
+  # Group the columns to get all combinations of factor levels
+  group_by(fct_rev(likelySimilarToFall2020Spring2021), fct_rev(likelyCurrentCircumstancesFall2021), fct_rev(likelyFullReturnToInPerson)) %>%
+  # Count frequency of each combination
+  summarise(y = n(), .groups = "keep") %>%
+  # Assign id to each combination
+  rowid_to_column("alluvium") %>%
+  # Convert to "long" format
+  pivot_longer(-c("y", "alluvium"), names_to = "x", names_transform = list("x" = as.factor),  values_to = "stratum", values_transform = list("stratum" = fct_rev))
+
+# Setup double column alluvial plot
+temp %>% ggplot(aes(x = x, y = y, stratum = stratum, alluvium = alluvium, fill = stratum, label = stratum)) +
+    geom_flow(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_stratum(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_fit_text(aes(label = str_remove(str_remove(as.character(stratum), " likely nor unlikely"), " test2")), stat = "stratum", width = .25, size = 8,  min.size = 6, reflow = TRUE, contrast = TRUE, outside = TRUE) +
+    scale_x_discrete(expand = expansion(add = 0.15), labels = str_wrap(c("Similar To Fall 2020 Spring 2021", "Similar To Fall 2021", "Return To Full In Person"), 13)) +
+    scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.margin = margin(r = 5, l = 1),
+      legend.position = "none",
+      axis.title.x = element_blank()
+    ) +
+    labs(
+      # title = "Level of Concern Before and After Seeing My Activity Page",
+      x = "Concern",
+      y = "Educators"
+    )
+ggsave("./figures/likely_to_use_alluvium_plot.pdf", width = 3.17 * 2, height = 3.17, units = "in", device = "pdf")
+
+remove(temp)
+```
+
+```{r likely_to_use_alluvium_2_plot, echo=FALSE}
+
+temp <- yesEducatorData %>%
+  # Group the columns to get all combinations of factor levels
+  group_by(fct_rev(likelySimilarToFall2020Spring2021), fct_rev(likelyCurrentCircumstancesFall2021)) %>%
+  # Count frequency of each combination
+  summarise(y = n(), .groups = "keep") %>%
+  # Assign id to each combination
+  rowid_to_column("alluvium") %>%
+  # Convert to "long" format
+  pivot_longer(-c("y", "alluvium"), names_to = "x", names_transform = list("x" = fct_rev),  values_to = "stratum", values_transform = list("stratum" = fct_rev))
+
+# Setup double column alluvial plot
+temp %>% ggplot(aes(x = x, y = y, stratum = stratum, alluvium = alluvium, fill = stratum, label = stratum)) +
+    geom_flow(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_stratum(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_fit_text(aes(label = str_remove(str_remove(as.character(stratum), " likely nor unlikely"), " test2")), stat = "stratum", width = .25, size = 8,  min.size = 6, reflow = TRUE, contrast = TRUE, outside = TRUE) +
+    scale_x_discrete(expand = expansion(add = 0.15), labels = str_wrap(c("Similar To Fall 2020 Spring 2021", "Similar To Fall 2021"), 13)) +
+    scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.margin = margin(r = 5, l = 1),
+      legend.position = "none",
+      axis.title.x = element_blank()
+    ) +
+    labs(
+      # title = "Level of Concern Before and After Seeing My Activity Page",
+      x = "Concern",
+      y = "Educators"
+    )
+ggsave("./figures/likely_to_use_alluvium_2020_to_2021_plot.pdf", width = 3.17, height = 13 / 16 * 3.17, units = "in", device = "pdf")
+
+remove(temp)
+```
+
+```{r likely_to_use_alluvium_3_plot, echo=FALSE}
+
+temp <- yesEducatorData %>%
+  # Group the columns to get all combinations of factor levels
+  group_by(fct_rev(likelySimilarToFall2020Spring2021), fct_rev(likelyFullReturnToInPerson)) %>%
+  # Count frequency of each combination
+  summarise(y = n(), .groups = "keep") %>%
+  # Assign id to each combination
+  rowid_to_column("alluvium") %>%
+  # Convert to "long" format
+  pivot_longer(-c("y", "alluvium"), names_to = "x", names_transform = list("x" = fct_rev),  values_to = "stratum", values_transform = list("stratum" = fct_rev))
+
+# Setup double column alluvial plot
+temp %>% ggplot(aes(x = x, y = y, stratum = stratum, alluvium = alluvium, fill = stratum, label = stratum)) +
+    geom_flow(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_stratum(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_fit_text(aes(label = str_remove(str_remove(as.character(stratum), " likely nor unlikely"), " test2")), stat = "stratum", width = .25, size = 8,  min.size = 6, reflow = TRUE, contrast = TRUE, outside = TRUE) +
+    scale_x_discrete(expand = expansion(add = 0.15), labels = str_wrap(c("Similar To Fall 2020 Spring 2021", "Full Return"), 13)) +
+    scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.margin = margin(r = 5, l = 1),
+      legend.position = "none",
+      axis.title.x = element_blank()
+    ) +
+    labs(
+      # title = "Level of Concern Before and After Seeing My Activity Page",
+      x = "Concern",
+      y = "Educators"
+    )
+ggsave("./figures/likely_to_use_alluvium_2020_to_full_return_plot.pdf", width = 3.17, height = 13 / 16 * 3.17, units = "in", device = "pdf")
+
+remove(temp)
+```
+
+```{r likely_to_use_alluvium_4_plot, echo=FALSE}
+
+temp <- yesEducatorData %>%
+  # Group the columns to get all combinations of factor levels
+  group_by(fct_rev(likelyCurrentCircumstancesFall2021), fct_rev(likelyFullReturnToInPerson)) %>%
+  # Count frequency of each combination
+  summarise(y = n(), .groups = "keep") %>%
+  # Assign id to each combination
+  rowid_to_column("alluvium") %>%
+  # Convert to "long" format
+  pivot_longer(-c("y", "alluvium"), names_to = "x", names_transform = list("x" = as.factor),  values_to = "stratum", values_transform = list("stratum" = fct_rev))
+
+# Setup double column alluvial plot
+temp %>% ggplot(aes(x = x, y = y, stratum = stratum, alluvium = alluvium, fill = stratum, label = stratum)) +
+    geom_flow(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_stratum(alpha = 1, width = .25, color = "grey50", size = .1) +
+    geom_fit_text(aes(label = str_remove(str_remove(as.character(stratum), " likely nor unlikely"), " test2")), stat = "stratum", width = .25, size = 8,  min.size = 6, reflow = TRUE, contrast = TRUE, outside = TRUE) +
+    scale_x_discrete(expand = expansion(add = 0.15), labels = str_wrap(c("Similar To Fall 2021", "Full Return"), 13)) +
+    scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.margin = margin(r = 5, l = 1),
+      legend.position = "none",
+      axis.title.x = element_blank()
+    ) +
+    labs(
+      # title = "Level of Concern Before and After Seeing My Activity Page",
+      x = "Concern",
+      y = "Educators"
+    )
+ggsave("./figures/likely_to_use_alluvium_2021_to_full_return_plot.pdf", width = 3.17, height = 13 / 16 * 3.17, units = "in", device = "pdf")
+
+remove(temp)
+```
+
+```{r percent_cheating_q20_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  ggplot(aes(y = "cheatingPercentage", fill = cheatingPercentage, xmin = 0, xmax = 1)) +
+  #geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #facet_wrap(question~., ncol = 1, labeller = labeller("question" = as_labeller(function(x){str_wrap(questionsStrings[x], 60)}))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1") +
+  #guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  labs("title" = str_wrap("I believe that online proctoring will catch cheating this percent of the time when students are actually cheating:", 45)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    #plot.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    # axis.text.y = element_text(size = 6),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    # legend.text = element_text(size = 6),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/percentage_cheating_q20.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+
+
+
+```{r catch_cheating_q21_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  pivot_longer(c(potentialCheating),
+               names_to = "question",
+               names_transform = list("question" = ~ ordered(.x, levels = c("potentialCheating"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = "question", fill = fct_relevel(responses, "I'm Unsure", after = 1), xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #facet_wrap(question~., ncol = 1, labeller = labeller("question" = as_labeller(function(x){str_wrap(questionsStrings[x], 60)}))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  labs("title" = str_wrap("Did [online exam proctoring service name] report any potential cheating during an exam?", 45)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    #plot.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    # axis.text.y = element_text(size = 6),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    # legend.text = element_text(size = 6),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.1))
+ggsave("./figures/catch_cheating_q21.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+
+```{r think_privacy_invasive_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  select(ResponseId, starts_with(c("thinkTwo"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "think",
+               names_pattern = "thinkTwo(.+)",
+               names_transform = list("think" = ~ ordered(str_replace_all(.x, c("PrivacyInvasive" = "Privacy Invasive", "RiskToPrivacy" = "Concern About Risks")), levels = c("Privacy Invasive", "Concern About Risks"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = think, fill = responses, xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_brewer(palette = "RdYlBu", labels = function(x){str_trunc(x, 38)}) +
+  # guides(fill = guide_legend(nrow = 2, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_blank(),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/think_privacy_invasive.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+```{r think_privacy_invasive_flipped_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  select(ResponseId, starts_with(c("thinkTwo"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "think",
+               names_pattern = "thinkTwo(.+)",
+               names_transform = list("think" = ~ ordered(str_replace_all(.x, c("PrivacyInvasive" = "Privacy Invasive", "RiskToPrivacy" = "Concern About Risks")), levels = c("Concern About Risks", "Privacy Invasive"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = think, fill = responses, xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(reverse = FALSE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_brewer(palette = "RdYlBu", labels = function(x){str_trunc(x, 38)}) +
+  # guides(fill = guide_legend(nrow = 2, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 3, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_blank(),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/think_privacy_invasive_flipped.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+```{r software_concern_q27_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  ggplot(aes(y = "concernAboutSoftware", fill = concernAboutSoftware, xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #facet_wrap(question~., ncol = 1, labeller = labeller("question" = as_labeller(function(x){str_wrap(questionsStrings[x], 60)}))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1) +
+  #guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 3, byrow = TRUE)) +
+  labs("title" = str_wrap("How concerned are you about students installing software created by [online exam proctoring service name] on their personal computers?", 45)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    #plot.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    # axis.text.y = element_text(size = 6),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    # legend.text = element_text(size = 6),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/software_concern_q27.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+```{r monitor_types_q29_simple_bar_plot, echo=FALSE}
+
+p <- ggplot(data=q29df, aes(x=enabled, y=monitoring)) +
+  labs(
+    "title" = str_wrap("Select all monitoring methods you enabled in your proctored exams. [Select all that apply]", 45)
+  ) +
+  geom_bar(stat="identity", width = .6, color = "grey50", fill = "#377EB8", size = .1) +
+  geom_text(aes(label = enabled, hjust = 1.2), color = "white", size = 2, show.legend = FALSE) +  
+  # geom_fit_text(aes(label = enabled), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05))) +
+  scale_y_discrete(limits = rev) +
+  #scale_fill_brewer(palette = "Set1", labels = function(x){str_trunc(x, 26)}) +
+  #guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_blank(),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    # legend.title = element_blank(),
+    # legend.position = "bottom",
+    # legend.justification = c("center", "top"),
+    # legend.key.size = unit(8, 'pt'),
+    # legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.01))
+ggsave("./figures/monitor_types_enabled_q29_simple.pdf", width = 3.17, height = 13/16 * 3.17, units = "in", device = "pdf")
+remove(p)
+
+```
+
+```{r monitor_types_simple_bar_plot, echo=FALSE}
+
+p <- ggplot(data=q29df, aes(x=prc, y=monitoring)) +
+  labs(
+    "title" = str_wrap("Select all monitoring methods you enabled in your proctored exams. [Select all that apply]", 45)
+  ) +
+  geom_bar(stat="identity", width = .6, color = "grey50", fill = "#377EB8", size = .1) +
+  geom_text(aes(label = enabled, hjust = 1.2), color = "white", size = 2, show.legend = FALSE) +  
+  # geom_fit_text(aes(label = enabled), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #scale_x_continuous(expand = expansion(add = c(0, 0.05))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #scale_fill_brewer(palette = "Set1", labels = function(x){str_trunc(x, 26)}) +
+  #guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_blank(),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    # legend.title = element_blank(),
+    # legend.position = "bottom",
+    # legend.justification = c("center", "top"),
+    # legend.key.size = unit(8, 'pt'),
+    # legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.01))
+ggsave("./figures/monitor_types_enabled.pdf", width = 3.17, height = 13/16 * 3.17, units = "in", device = "pdf")
+remove(p)
+
+```
+
+
+```{r monitor_types_enabled_q29_bar_plot, echo=FALSE}
+
+p <- q29Data %>%
+  select(ResponseId, starts_with(c("monitor"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "monitor",
+               names_pattern = "monitor(.+)",
+               names_transform = list("monitor" = ~ ordered(str_replace_all(.x, c("LiveProctorVisible" = "Live Proctor Visible", "LiveProctorNotVisible" = "Live Proctor Not Visible", "WebBrowserHistory" = "Web Browser History", "EyeMovementTracking" = "Eye Movement Tracking", "FaceDetection" = "Face Detection", "LockdownBrowser" = "Lockdown Browser", "MouseMovementTracking" = "Mouse Movement Tracking", "KeyboardRestrictions" = "Keyboard Restrictions", "ScreenRecording" = "Screen Recording", "MicrophoneRecording" = "Microphone Recording", "InternetActivityMonitoring" = "Internet Activity Monitoring", "WebcamRecording" = "Webcam Recording", "Other" = "Other")), levels = c("Lockdown Browser", "Webcam Recording", "Microphone Recording", "Face Detection", "Screen Recording", "Eye Movement Tracking", "Live Proctor Visible", "Internet Activity Monitoring", "Live Proctor Not Visible", "Keyboard Restrictions", "Web Browser History", "Other",  "Mouse Movement Tracking"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = monitor, fill = responses, xmin = 0, xmax = 1)) +
+  labs(
+    "title" = str_wrap("Select all monitoring methods you enabled in your proctored exams. [Select all that apply]", 45)
+  ) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_brewer(palette = "Set1", labels = function(x){str_trunc(x, 26)}) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_blank(),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/monitor_types_enabled_q29.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+
+
+```{r use_same_monitoring_options_q30_bar_plot, echo=FALSE}
+p <- yesEducatorData %>%
+  pivot_longer(c(wouldYouUseSameOptions),
+               names_to = "question",
+               names_transform = list("question" = ~ ordered(.x, levels = c("wouldYouUseSameOptions"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = "question", fill = fct_relevel(responses, "I'm Unsure", after = 1), xmin = 0, xmax = 1)) +
+  geom_bar(position = position_fill(), width = .6, color = "grey50", size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  #facet_wrap(question~., ncol = 1, labeller = labeller("question" = as_labeller(function(x){str_wrap(questionsStrings[x], 60)}))) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  guides(fill = guide_legend(reverse = TRUE, keywidth = unit(8, 'pt'), keyheight = unit(8, 'pt'))) +
+  labs("title" = str_wrap("If you were to administer another online proctored exam would you enable the same monitoring options again?", 45)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(l = 3),
+    plot.title.position = "plot",
+    #plot.title = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.text.y = element_blank(),
+    # axis.text.y = element_text(size = 6),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    # legend.text = element_text(size = 6),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.1))
+ggsave("./figures/use_same_monitoring_q30.pdf", width = 3.17, height = 3/4 * 3.17, units = "in", device = "pdf")
+
+remove(p)
+```
+
+
+```{r monitor_types_comfort_q33_with_q29_bar_plot, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- q33Data %>%
+  select(ResponseId, starts_with(c("monitor"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "monitor",
+               names_pattern = "monitor(.+)",
+               names_transform = list("monitor" = ~ ordered(str_replace_all(.x, c("LiveProctorVisible" = "Live Proctor Visible", "LiveProctorNotVisible" = "Live Proctor Not Visible", "WebBrowserHistory" = "Web Browser History", "EyeMovementTracking" = "Eye Movement", "FaceDetection" = "Face Detection", "LockdownBrowser" = "Lockdown Browser", "MouseMovementTracking" = "Mouse Movement", "KeyboardRestrictions" = "Keyboard Restrictions", "ScreenRecording" = "Screen Recording", "MicrophoneRecording" = "Microphone Recording", "InternetActivityMonitoring" = "Internet Activity", "WebcamRecording" = "Webcam Recording")), levels = c("Lockdown Browser", "Webcam Recording", "Microphone Recording", "Face Detection", "Screen Recording", "Eye Movement", "Live Proctor Visible", "Internet Activity", "Live Proctor Not Visible", "Keyboard Restrictions", "Web Browser History", "Mouse Movement"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = monitor, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = "Comfort Level For Each Monitoring Type") +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .8)) +
+  scale_fill_brewer(palette = "RdYlBu", labels = c("Extremely uncomfortable", "Somewhat uncomfortable", "Neither comfortable nor...", "Somewhat comfortable", "Extremely comfortable"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/monitor_types_comfort_q33_with_q29.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+```{r install_concern_bar_plot, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- q27Data %>%
+  select(ResponseId, starts_with(c("install"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "install",
+               names_pattern = "install(.+)",
+               names_transform = list("install" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = install, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("How concerned are you about students installing software created by [online exam proctoring service name] on their personal computers?", 50)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .6)) +
+  # concern = c("Not at all concerned", "Slightly concerned", "Somewhat concerned", "Moderately concerned", "Extremely concerned"),
+  #scale_fill_brewer(palette = "RdYlBu", labels = c("Extremely concerned", "Somewhat concerned", "Neither concerned nor...", "Somewhat concerned", "Extremely concerned"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/install_concern_q27.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+
+```{r q34_1_bar_chart, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p1 <- q34_1_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Full Name", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p2 <- q34_2_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Date of Birth", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+
+p3 <- q34_3_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Photo-ID", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p4 <- q34_4_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Social Security Number", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+
+p5 <- q34_5_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Street Address", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p6 <- q34_6_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Geographical Coordinates", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p7 <- q34_7_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Audio Recording", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+
+p8 <- q34_8_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Video Recording", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p9 <- q34_9_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Screen View", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p10 <- q34_10_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Room Scan", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p11 <- q34_11_data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Application Record", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 5,  vjust = 20, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+plot_grid(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11 + theme(legend.position = "none"), get_legend(p11), nrow = 4, rel_heights = c(1, 1, 1, 1))  
+#plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/q34_1_11.pdf", width = 6.34, height = 6.34, units = "in", device = "pdf")
+remove(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11)
+```
+
+
+```{r q22_25_bar_chart, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p1 <- q22Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Privacy Invasive", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .8)) +
+  #scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  scale_fill_brewer(palette = "RdYlBu", labels = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p2 <- q23Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Reasonable Tradeoff", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .8)) +
+  #scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  scale_fill_brewer(palette = "RdYlBu", labels = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+
+p3 <- q24Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Concerned About Risks", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol, show.legend = FALSE) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .8)) +
+  #scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+   scale_fill_brewer(palette = "RdYlBu", labels = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+p4 <- q25Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Good Solution for Exams", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .8)) +
+  #scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+  scale_fill_brewer(palette = "RdYlBu", labels = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 1,  vjust = 20, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = c(1.0, .5),
+    #legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+
+plot_grid(p1, p2, p3, p4 + theme(legend.position = "center"), get_legend(p4), nrow = 3, rel_heights = c(1, 1, 0.2))  
+#plot_grid(p + theme(legend.position = "center"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/q22_25.pdf", width = 6.34, height = 3.17, units = "in", device = "pdf")
+remove(p1, p2, p3, p4)
+```
+
+```{r q19_bar_chart, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- q19Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("The use of online exam proctoring tools makes it less likely that my students will cheat.", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .8)) +
+  #scale_fill_brewer(palette = "RdYlBu", direction = -1, drop = FALSE, na.translate = FALSE) +
+  # agreement2 = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"),
+  scale_fill_brewer(palette = "RdYlBu", labels = c("Strongly disagree", "Somewhat disagree", "Neither agree nor disagree", "Somewhat agree", "Strongly agree"), drop = FALSE, na.translate = FALSE) +  # , na.value = mycol
+  guides(fill = guide_legend(reverse = FALSE, nrow = 3,  vjust = 20, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    #legend.position = c(1.0, .5),
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/q19.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+
+```{r catch_cheating_with_tool_bar_chart, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- q21Data %>%
+  select(ResponseId, starts_with(c("tool"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "tool",
+               names_pattern = "tool(.+)",
+               names_transform = list("tool" = ~ ordered(str_replace_all(.x, c("Examsoft" = "Examsoft", "ProctorU" = "ProctorU", "Respondus" = "Respondus", "RPNow" = "RPNow", "Other" = "Other", "Total" = "Total")), levels = c("Examsoft", "ProctorU", "Respondus", "RPNow", "Other", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = tool, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Did [online exam proctoring service name] report any potential cheating during an exam?", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "Set1", labels = c("No", "I'm Unsure", "Yes"), drop = FALSE, na.translate = FALSE) +
+  #scale_fill_brewer(palette = "Set1", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/catch_cheating_with_tool.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+```{r student_information_concern_q34_bar_plot, echo=FALSE}
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- concernData %>%
+  select(ResponseId, starts_with(c("student"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "student",
+               names_pattern = "student(.+)",
+               names_transform = list("student" = ~ ordered(str_replace_all(.x, c("FullName" = "Full Name", "DateOfBirth" = "Date of Birth", "PhotoId" = "Photo Id", "SocialSecurityNumber" = "Social Security Number", "StreetAddress" = "Street Address", "Coordinates" = "Geographic Coordinates", "AudioRecording" = "Audio Recording", "VideoRecording" = "Video Recording", "ScreenView" = "Screen View", "RoomScan" = "Room Scan", "ApplicationRecord" = "Application Record")), levels = c("Social Security Number", "Date of Birth", "Street Address", "Geographic Coordinates", "Video Recording", "Photo Id", "Room Scan", "Audio Recording", "Full Name", "Application Record", "Screen View"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = student, fill = responses, xmin = 0, xmax = 1)) +
+  labs(
+    "title" = str_wrap("Concern For Students Sharing This Information", 45)
+  ) +
+  geom_bar(position = position_fill(reverse = FALSE), width = .6, color = mycol, size = .1) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = FALSE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_brewer(palette = "RdYlBu", direction = -1, labels = function(x){str_trunc(x, 38)}) +
+  # guides(fill = guide_legend(nrow = 2, byrow = TRUE, keywidth = unit(7, 'pt'))) +
+  guides(fill = guide_legend(reverse = TRUE, nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/student_information_concern_q34.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```
+
+
+
+```{r n1_by_school_bar_chart, echo=FALSE}
+
+mycol <- rgb(0, 0, 255, max = 255, alpha = 0, names = "blue50")
+
+p <- n1Data %>%
+  select(ResponseId, starts_with(c("school"))) %>%
+  pivot_longer(-ResponseId,
+               names_to = "school",
+               names_pattern = "school(.+)",
+               names_transform = list("school" = ~ ordered(str_replace_all(.x, c("ArtsSciences" = "Arts & Sciences", "PublicHealth" = "Public Health", "InternationalAffairs" = "International Affairs", "Business" = "Business", "EngineeringAppliedSci" = "Engineering & Applied Sci.", "Education" = "Education", "Medicine" = "Medicine", "ProfessionalStudies" =  "Professional Studies", "Other" = "Other", "ArtsDesign" = "Arts & Design", "PoliticalManagement" = "Political Management", "PublicAffairs" = "Public Affairs", "Nursing" = "Nursing",  "Total" = "Total")), levels = c("Arts & Sciences", "Public Health", "International Affairs", "Business", "Engineering & Applied Sci.", "Education", "Medicine", "Professional Studies", "Other", "Arts & Design", "Political Management", "Public Affairs", "Nursing", "Total"))),
+               values_to = "responses"
+  ) %>%
+  ggplot(aes(y = school, fill = responses, xmin = 0, xmax = 1)) +
+  labs("title" = str_wrap("Did you consider using any online exam proctoring tools?", 45)) +
+  geom_bar(position = position_fill(reverse = TRUE), width = .6, size = .1, color = mycol) +
+  geom_fit_text(stat = "count", aes(label = ..count..), position=position_fill(reverse = TRUE), size = 8,  min.size = 7, reflow = TRUE, contrast = TRUE, show.legend = FALSE) +
+  scale_x_continuous(expand = expansion(add = c(0, 0.05)), labels = scales::percent) +
+  scale_y_discrete(limits = rev) +
+  #coord_cartesian(xlim = c(0, .6)) +
+  scale_fill_brewer(palette = "Set1", labels = c("No", "I'm Unsure", "Yes"), drop = FALSE, na.translate = FALSE) +
+  #scale_fill_brewer(palette = "Set1", direction = -1, drop = FALSE, na.translate = FALSE) +
+  guides(fill = guide_legend(reverse = FALSE, nrow = 1, byrow = TRUE)) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.margin = margin(r = 3),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, vjust = 0, size = 10),
+    strip.text = element_text(hjust = 0),
+    axis.title = element_blank(),
+    axis.line.y = element_line(color = "grey50"),
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c("center", "top"),
+    legend.key.size = unit(8, 'pt'),
+    legend.box.margin = margin(),
+    panel.grid.major.y = element_blank()
+  ) 
+  
+plot_grid(p + theme(legend.position = "none"), get_legend(p), nrow = 2, rel_heights = c(1, 0.3))
+ggsave("./figures/n1_by_school.pdf", width = 3.17, height = 3.17, units = "in", device = "pdf")
+remove(p)
+```

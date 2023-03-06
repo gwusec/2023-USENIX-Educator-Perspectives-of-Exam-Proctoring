@@ -18,9 +18,10 @@ These include:
   * TXT-survey-file(s)
 * __Scripts__ 
   - Quantitative_analysis: *Scripts used for both initial processing of quantitative data, and for exploratory analysis*
-    - R_script_files
+    - R_script_files including 2021-educator.Rmd
   - Qualitative_analysis: *Scriptss for assessing qualitative analysis*
-    - irr.py
+    - irr.py Script to calculate inter-rater reliablility (Cohen's Kappa)
+    - runirr.sh Script that will run the irr.py program on all primary and secondary coding files
 * __Data__
   - Quantitative_data
     - Likert_response_data_files
@@ -29,7 +30,7 @@ These include:
     - Qualitative_codebok_files
 * __Figures__
   * Rendered_figure_files
-  * Table_filies (R script outputs and .tex files)
+  * Table_files (R script outputs and .tex files)
 * __PDFs__
   * USENIX-paper-pdf
   * Arxiv-paper-pdf
