@@ -11,7 +11,7 @@ This document outlines the scripts directory structure and describes each of the
 
 ## Directory Structure:
 * __quantative-analysis__ : Scripts used to analyze Likert response questions and perform additional exploratory analysis.
-	* TODO: Add filename(s) and descriptions as bulleted list
+	* 2021-educator.Rmd  - R script to generate the tables and figures used in the paper.
 
 * __qualitative-analysis__ : Scripts used as part of the qualitative analysis
-	* irr.py  
+	* irr.py  - Inter-rater reliability script used to calculate Cohen's Kappa for inter-coder agreement 
