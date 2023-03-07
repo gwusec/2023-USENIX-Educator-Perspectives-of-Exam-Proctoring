@@ -19,7 +19,7 @@ These include:
 * __Scripts__ 
   - Quantitative_analysis: *Scripts used for both initial processing of quantitative data, and for exploratory analysis*
     - R_script_files including 2021-educator.Rmd
-  - Qualitative_analysis: *Scriptss for assessing qualitative analysis*
+  - Qualitative_analysis: *Scripts for assessing qualitative analysis*
     - irr.py Script to calculate inter-rater reliablility (Cohen's Kappa)
     - runirr.sh Script that will run the irr.py program on all primary and secondary coding files
 * __Data__
